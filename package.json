@@ -1,0 +1,42 @@
+{
+  "name": "read-avro",
+  "version": "0.0.1",
+  "description": "A test package to read avro files through its schema",
+  "license": "MIT",
+  "private": true,
+  "bin": {
+    "key_diff": "bin/key_diff.js",
+    "venn_diff": "bin/venn_diff.js"
+  },
+  "scripts": {
+    "pretest": "yarn build",
+    "test": "NODE_ENV=development node --inspect lib/index.js",
+    "runit": "NODE_ENV=development node --inspect lib/index.js",
+    "build": "babel src/ --out-dir lib/ --copy-files--ignore test.js",
+    "push": "git push origin HEAD:refs/for/master",
+    "keyTest1": "node bin/key_diff.js avro/fake_account_tc_guid_1/assignments.avro avro/fake_account_tc_guid_2/assignments.avro assignmentId",
+    "keyTest2": "node bin/key_diff.js avro/fake_account_tc_guid_1/assignments.avro avro/fake_account_tc_guid_2/studentAssignments.avro assignmentId",
+    "keyTest2Sym": "node bin/key_diff.js avro/fake_account_tc_guid_2/studentAssignments.avro avro/fake_account_tc_guid_1/assignments.avro assignmentId",
+    "keyTest2All": "yarn build && yarn keyTest2 && yarn keyTest2Sym",
+    "keyTest3": "node bin/key_diff.js avro/submissions/studentAssignmentsOld.avro avro/submissions/studentAssignmentsNew.avro studentId,assignmentId",
+    "keyTest3Sym": "node bin/key_diff.js avro/submissions/studentAssignmentsNew.avro avro/submissions/studentAssignmentsOld.avro studentId,assignmentId",
+    "keyTest3All": "yarn build && yarn keyTest3 && yarn keyTest3Sym",
+    "vennTest1": "node bin/venn_diff.js avro/fake_account_tc_guid_1/assignments.avro avro/fake_account_tc_guid_2/studentAssignments.avro",
+    "vennTest2": "node bin/venn_diff.js avro/fake_account_tc_guid_1/assignments.avro avro/fake_account_tc_guid_2/assignments.avro",
+    "vennTestAll": "yarn build && yarn vennTest1 && yarn vennTest2"
+  },
+  "dependencies": {
+    "@babel/polyfill": "^7.4.3",
+    "avsc": "^5.4.12",
+    "commander": "^2.20.0",
+    "core-js": "2",
+    "deep-object-diff": "^1.1.0",
+    "snappy": "^6.2.3"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.4.3",
+    "@babel/core": "^7.4.3",
+    "@babel/preset-env": "^7.4.3",
+    "eslint": "^5.16.0"
+  }
+}
