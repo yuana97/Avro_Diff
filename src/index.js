@@ -171,7 +171,7 @@ export const keyDiffHelper = async (arr1, arr2, key) => {
       }
       // Else the objects are equal, push the ids to "unchanged".
       else {
-        output["unchanged"].push(key + ": " + key1);
+        output["unchanged"].push(key + ": " + str1);
       }
       // increment both i and j.
       i++;
