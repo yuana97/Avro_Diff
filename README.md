@@ -8,8 +8,8 @@ Pandalytics Team @ Instructure Inc
 1. clone the repo
 2. cd to the repo directory
 3. run `yarn build`
-4. as of now modify the field P0_FIELDS in index.js to have your desired fields to scan.
-5. run `node bin/key_diff.js <file1> <file2> <key>` or `node bin/venn_diff.js <file1> <file2>`
+4. run `node bin/key_diff.js <file1> <file2> <key>` or `node bin/venn_diff.js <file1> <file2>`
+5. See package.json for some example scripts
 
 ## Dev Stuff
 * src/index.js contains the main logic & functions which may be useful elsewhere
