@@ -135,6 +135,7 @@ export const keyDiff = async (file1, file2, key) => {
   // extract rows to arr1 and arr2
   const arr2 = await extractRows(file2).then(res => res);
   const arr1 = await extractRows(file1).then(res => res);
+
   // produce a diff object of arr1 and arr2
   const diff = await keyDiffHelper(arr1, arr2, key);
   return diff;
