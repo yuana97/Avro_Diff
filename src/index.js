@@ -14,6 +14,8 @@ import {inspect} from 'util';
 import stableStringify from 'json-stable-stringify';
 import 'colors';
 
+import {CONFIG} from './config.js';
+
 /**
  * TODO:
  * filteredSchema: filtering will be read in from a config file (high priority)
@@ -22,65 +24,57 @@ import 'colors';
  * add functionality for nested fields: filter by/assign as key nested fields (medium)
  * add functionality to use object as key (medium)
  * improve detailedDiff: deleted fields show value as undefined but I want to show their old value (medium)
- *    note you can get around this by switching the order you pass in file1 and file2 but I would rather show everything
+ *    note you can get around this by switching the order you pass in oldFile and newFile but I would rather show everything
  *    in one place.
  */
 
 /**
- * Given a schema returns its intersection with P0_FIELDS
+ * Given a schema and fields to KEEP or IGNORE, returns a schema with fields in KEEP
+ * and not in IGNORE. Pass in null for KEEP or IGNORE to not filter by that argument.
  * @param {Object} schema - schema for an avro file
- * @returns {Object} file2 - returns the schema restricted to fields in P0_FIELDS
+ * @param {Set} keepSet only fields in keepSet are not filtered out.
+ * @param {Set} ignoreSet all fields in ignoreSet are filtered out.
+ * @returns {Object} newFile - returns the schema restricted to fields in P0_FIELDS
  */
 const filteredSchema = (schema) => {
-  const KEEP_FIELDS = new Set(['studentId', 'assignmentId', 'assignmentName', 'submission', 'uniqueStudentCount']);
-  const IGNORE_FIELDS = new Set(['ltiTcGuid', 'submission']);
+  const keepSet = CONFIG.keepFields == null ? null : new Set(CONFIG.keepFields);
+  const ignoreSet = CONFIG.ignoreFields == null ? null : new Set(CONFIG.ignoreFields);
+
+  const fieldFilter = (field) => {
+    return (ignoreSet == null || !ignoreSet.has(field.name)) && (keepSet == null || keepSet.has(field.name));
+  }
+
   return {
     ...schema,
-    // uncomment below line to only keep fields in KEEP_FIELDS
-    // fields: schema.fields.filter((field) => KEEP_FIELDS.has(field.name)),
-    // uncomment below line to ignore fields in IGNORE_FIELDS
-    // fields: schema.fields.filter((field) => !IGNORE_FIELDS.has(field.name)),
+    fields: schema.fields.filter(fieldFilter),
   };
 }
 
-/**
- * Given filepaths to an old and new avro file, prints to console
- * an object representing a venn diagram of the old and new avro files.
- * The object contains 3 fields 'removed', 'added', and 'intersection'
- * each of which contains rows only in old, only in new, and in both
- * mapped to a count of how many copies there are.
- * @param {string} file1 - filepath to old .avro file.
- * @param {string} file2 - filepath to new .avro file.
- */
-export const printVennDiff = async (file1, file2) => {
-  // extract and filter the schemas of file1 and file2
-  const schema1 = await getOriginalSchema(file1).then(res => res);
-  const schema2 = await getOriginalSchema(file2).then(res => res);
-  const newSchema1 = filteredSchema(schema1);
-  const newSchema2 = filteredSchema(schema2);
-  let venn = {
-    'removed': {},
-    'added': {},
-    'intersection': {},
+export const printVennDiff = (venn) => {
+  // having streamed both files to venn, print venn.
+  console.log(inspect({ "added" : venn.added}, { depth: 'Infinity' }).green);
+  console.log(inspect({ "removed" : venn.removed}, { depth: 'Infinity' }).red);
+  console.log(inspect({ "intersection" : venn.intersection}, { depth: 'Infinity' }).yellow);
+  // print some stats about the diff
+  console.log(`color code: green for added, red for removed, yellow for intersection`);
+  console.log(`${venn['added'] != null ? Object.keys(venn['added']).length : 0} removed`);
+  console.log(`${venn['removed'] != null ? Object.keys(venn['removed']).length : 0} added`);
+  console.log(`${venn['intersection'] != null ? Object.keys(venn['intersection']).length : 0} in intersection`);
+}
+
+export const vennDiff = async (oldFile, newFile) => {
+  const oldSchema = await getOriginalSchema(oldFile).then(filteredSchema);
+  const newSchema = await getOriginalSchema(newFile).then(filteredSchema);
+  const venn = {
+    "removed" : {},
+    "added" : {},
+    "intersection" : {},
   };
-  // read file2 and file2 according to newSchema1 and newSchema2
-  readAvroFile(makeDecoder(file1, { readerSchema: newSchema1 }), venn, vennParser(1))
-    .then(readAvroFile(makeDecoder(file2, { readerSchema: newSchema2 }), venn, vennParser(2)))
-    .then(() => {
-      // having streamed both files to venn, print venn.
-      console.log(inspect({ "added" : venn.added}, { depth: 'Infinity' }).green);
-      console.log(inspect({ "removed" : venn.removed}, { depth: 'Infinity' }).red);
-      console.log(inspect({ "intersection" : venn.intersection}, { depth: 'Infinity' }).yellow);
-      // print some stats about the diff
-      console.log(`color code: green for added, red for removed, yellow for intersection`);
-      console.log(`${Object.keys(venn['removed']).length || 0} removed`);
-      console.log(`${Object.keys(venn['added']).length || 0} added`);
-      console.log(`${Object.keys(venn['intersection']).length || 0} in intersection`);
-    })
-    // TODO: improved error handling
-    .catch(() => {
-      console.log('error');
-    });
+
+  await readAvroFile(makeDecoder(oldFile, {readerSchema: oldSchema}), venn, vennParser(1));
+  await readAvroFile(makeDecoder(newFile, {readerSchema: newSchema}), venn, vennParser(2));
+
+  return venn;
 }
 
 /**
@@ -123,34 +117,30 @@ const vennParser = num => venn => row => {
 
 /**
  * Returns an object representing a diff of two Avro files.
- * @param {string} file1 - filepath to old .avro file.
- * @param {string} file2 - filepath to new .avro file.
- * @param {string[]} key  - fields comprising a key to diff file1 and file2
+ * @param {string} oldFile - filepath to old .avro file.
+ * @param {string} newFile - filepath to new .avro file.
+ * @param {string[]} key  - fields comprising a key to diff oldFile and newFile
  * @returns {Object} Returns an object with schema {added:[Array], removed:[Array], changed:[Array], unchanged[Array]}
  *                    where the even indices of the arrays are strings of the form "<key>: <value>" and the odd indices
  *                    contain the decoded rows of Avro, except in the changed field where the odd indices contain
  *                    JSON diff objects.
  */
-export const keyDiff = async (file1, file2, key) => {
-  // extract rows to arr1 and arr2
-  const arr2 = await extractRows(file2).then(res => res);
-  const arr1 = await extractRows(file1).then(res => res);
+export const keyDiff = async (oldFile, newFile, key) => {
+  // extract rows to oldData and newData
+  const newData = await extractRows(newFile);
+  const oldData = await extractRows(oldFile);
 
-  // produce a diff object of arr1 and arr2
-  const diff = await keyDiffHelper(arr1, arr2, key);
+  // produce a diff object of oldData and newData
+  const diff = await keyDiffHelper(oldData, newData, key);
   return diff;
 }
 
 /**
- * Prints an object representing a diff of file1 and file2 based on
+ * Prints an object representing a diff of oldFile and newFile based on
  * the given key to console.
- * @param {string} file1 - filepath to old .avro file.
- * @param {string} file2 - filepath to new .avro file.
- * @param {string[]} key  - fields comprising a key to diff file1 and file2
+ * @param {Object} diff - an object outputted from keyDiff
  */
-export const printKeyDiff = async (file1, file2, key) => {
-  // produce a diff object of arr1 and arr2
-  const diff = await keyDiff(file1, file2, key);
+export const printKeyDiff = (diff) => {
   // log the diff object
   console.log(inspect({ "added" : diff.added}, { depth: 'Infinity' }).green);
   console.log(inspect({ "removed" : diff.removed}, { depth: 'Infinity' }).red);
@@ -163,16 +153,14 @@ export const printKeyDiff = async (file1, file2, key) => {
 }
 
 /**
- * Returns an object representing a diff of arr1 and arr2 based on key.
- * @param {Object[]} arr1 - array containing rows of old .avro file.
- * @param {Object[]} arr2 - array containing rows of new .avro file.
- * @param {string[]} key  - fields comprising a key to diff arr1 and arr2
+ * Returns an object representing a diff of oldData and newData based on key.
+ * @param {Object[]} oldData - array containing rows of old .avro file.
+ * @param {Object[]} newData - array containing rows of new .avro file.
+ * @param {string[]} key  - fields comprising a key to diff oldData and newData
  * @returns {Object} Returns an object with schema {added:[Array], removed:[Array], changed:[Array], unchanged[Array]}
- *                    where the even indices of the arrays are strings of the form "<key>: <value>" and the odd indices
- *                    contain the decoded rows of Avro, except in the changed field where the odd indices contain
- *                    JSON diff objects.
+ *                    where the elements of each array are objects with schema {id:[Array], data:{Object}}
  */
-export const keyDiffHelper = async (arr1, arr2, key) => {
+export const keyDiffHelper = async (oldData, newData, key) => {
   // comparison function to order array based on key.
   // a,b are Objects which represent decoded rows of avro.
   const compare = (a, b) => {
@@ -187,50 +175,50 @@ export const keyDiffHelper = async (arr1, arr2, key) => {
     'changed': [],
     'unchanged': [],
   };
-  // sort arr1 and arr2 according to dictionary order of key
-  arr1.sort(compare);
-  arr2.sort(compare);
-  // initialize pointers i j for arr1 arr2. While i j are not finished
-  // iterating through arr1 arr2, update output.
-  for (let i = 0, j = 0; i < arr1.length || j < arr2.length;) {
-    const key1 = i === arr1.length ? null : constructKey(arr1[i], key);
-    const key2 = j === arr2.length ? null : constructKey(arr2[j], key);
+  // sort oldData and newData according to dictionary order of key
+  oldData.sort(compare);
+  newData.sort(compare);
+  // initialize pointers i j for oldData newData. While i j are not finished
+  // iterating through oldData newData, update output.
+  for (let i = 0, j = 0; i < oldData.length || j < newData.length;) {
+    const key1 = i === oldData.length ? null : constructKey(oldData[i], key);
+    const key2 = j === newData.length ? null : constructKey(newData[j], key);
     const order = lexCompare(key1, key2);
-    const JSONDiff = {};
-    // order < 0 => arr1[i] precedes arr2[j] => arr1[i] unique => push data
+    const jsonDiff = {};
+    // order < 0 => oldData[i] precedes newData[j] => oldData[i] unique => push data
     if (order < 0) {
-      JSONDiff['id'] = key1;
-      JSONDiff['data'] = arr1[i];
-      output['removed'].push(JSONDiff);
+      jsonDiff['id'] = key1;
+      jsonDiff['data'] = oldData[i];
+      output['removed'].push(jsonDiff);
       i++;
     }
-    // order > 0 => arr2[j] precedes arr1[i] => arr2[j] unique => push data
+    // order > 0 => newData[j] precedes oldData[i] => newData[j] unique => push data
     else if (order > 0) {
-      JSONDiff['id'] = key2;
-      JSONDiff['data'] = arr2[j];
-      output['added'].push(JSONDiff);
+      jsonDiff['id'] = key2;
+      jsonDiff['data'] = newData[j];
+      output['added'].push(jsonDiff);
       j++;
     }
-    // else arr1[i] corresponds to arr2[j], process both rows
+    // else oldData[i] corresponds to newData[j], process both rows
     else {
       // If objects are not equal push the diff to 'changed'.
-      const diffObj = detailedDiff(arr1[i], arr2[j]);
+      const diffObj = detailedDiff(oldData[i], newData[j]);
       if(!diffIsEmpty(diffObj)) {
-        JSONDiff['id'] = key2;
-        JSONDiff['data'] = diffObj;
-        output['changed'].push(JSONDiff);
+        jsonDiff['id'] = key2;
+        jsonDiff['data'] = diffObj;
+        output['changed'].push(jsonDiff);
       }
       // Else the objects are equal, push the ids to 'unchanged'.
       else {
-        JSONDiff['id'] = key2;
-        JSONDiff['data'] = arr2[j];
-        output['unchanged'].push(JSONDiff);
+        jsonDiff['id'] = key2;
+        jsonDiff['data'] = newData[j];
+        output['unchanged'].push(jsonDiff);
       }
       i++;
       j++;
     }
   }
-  // at this point we have compared all elements of arr1, arr2 so we return.
+  // at this point we have compared all elements of oldData, newData so we return.
   return output;
 }
 
@@ -240,19 +228,9 @@ export const keyDiffHelper = async (arr1, arr2, key) => {
  * @returns {Promise} - Promise which resolves to an Object[] containing the rows of the given file.
  */
 export const extractRows = async (file) => {
-  let promise = new Promise(function(resolve) {
-    // get original schema 'result' of file
-    getOriginalSchema(file).then((result) => {
-      // let newSchema be the intersection of result and P0_FIELDS
-      const newSchema = filteredSchema(result);
-      // read rows according to newSchema into an array and resolve this array.
-      readAvroFile(makeDecoder(file, {readerSchema: newSchema}), [], extractRowsParser).then((arr) => {
-        resolve(arr);
-      });
-    });
-  });
-
-  return promise;
+  const schema = await getOriginalSchema(file).then(filteredSchema);
+  const fileData = await readAvroFile(makeDecoder(file, {readerSchema: schema}), [], extractRowsParser).then(passThrough);
+  return fileData;
 }
 
 /**
@@ -302,31 +280,35 @@ export const constructKey = (row, fields) => {
 /**
  * Lexicographic order for two arrays of strings.
  * Null/undefined are ahead of the order compared to any non-null object.
- * @param {string[]} arr1 - first array to compare
- * @param {string[]} arr2 - second array to compare
- * @returns {number}  returns a negative number if arr1 < arr2,
- *                    a positive number if arr1 > arr2, 0 otherwise
+ * @param {string[]} id1 - first array to compare
+ * @param {string[]} id2 - second array to compare
+ * @returns {number}  returns a negative number if id1 < id2,
+ *                    a positive number if id1 > id2, 0 otherwise
  */
-export const lexCompare = (arr1, arr2) => {
+export const lexCompare = (id1, id2) => {
   // null goes to the end of the ordering to make keyDiffHelper more elegant.
-  if (arr1 == null && arr2 == null) return 0;
-  if (arr1 == null) return 1;
-  if (arr2 == null) return -1;
+  if (id1 == null && id2 == null) return 0;
+  if (id1 == null) return 1;
+  if (id2 == null) return -1;
   // iterate len times to avoid null pointer exception
-  const len = Math.min(arr1.length, arr2.length);
+  const len = Math.min(id1.length, id2.length);
   for (let i = 0; i < len; i++) {
-    // mismatch => return corresponding output.
-    if (arr1[i] < arr2[i]) {
-      return -1;
-    }
-    if (arr1[i] > arr2[i]) {
-      return 1;
-    }
+      // mismatch => return corresponding output.
+      if (id1[i] < id2[i]) {
+          return -1;
+      }
+      if (id1[i] > id2[i]) {
+          return 1;
+      }
   }
   // no return so far => one array is a prefix of the other.
-  // return neg if arr1 is prefix, pos if arr2 is prefix, 0 if arrays are identical.
-  return arr1.length - arr2.length;
+  // return neg if id1 is prefix, pos if id2 is prefix, 0 if arrays are identical.
+  return id1.length - id2.length;
 }
+
+
+// this function is used to get result objects out of a Promise
+const passThrough = res => res;
 
 /* <=== End of misc helper functions ===> */
 
@@ -336,11 +318,11 @@ export const lexCompare = (arr1, arr2) => {
 // See https://github.com/mtth/avsc/wiki/API#class-blockdecoderopts
 const codecs = {
   // eslint-disable-next-line promise/prefer-await-to-callbacks
-  snappy (buf, cb) {
+  snappy : function (buf, cb) {
     // Avro appends checksums to compressed blocks, which we skip here.
     // eslint-disable-next-line no-magic-numbers
     return snappy.uncompress(buf.slice(0, buf.length - 4), cb);
-  }
+  },
 };
 
 /**
@@ -350,13 +332,24 @@ const codecs = {
  * @param {Object} opts - Object containing decoding options. See https://github.com/mtth/avsc/wiki/API#class-blockdecoderopts
  * @returns {fileDecoder} fileDecoder for the given file according to the given options.
  */
-const makeDecoder = (file, opts) => avro.createFileDecoder(
-  file,
-  {
-    codecs,
-    ...(opts && opts.readerSchema ? {readerSchema: opts.readerSchema} : {}),
+const makeDecoder = (file, opts = {}) => {
+  if (CONFIG.codecs == null || CONFIG.codecs.toLowerCase() !== 'snappy') {
+    return avro.createFileDecoder(
+      file,
+      {
+        ...(opts && opts.readerSchema ? { readerSchema: opts.readerSchema } : {}),
+      }
+    );
+  } else {
+    return avro.createFileDecoder(
+      file,
+      {
+        codecs,
+        ...(opts && opts.readerSchema ? { readerSchema: opts.readerSchema } : {}),
+      }
+    );
   }
-);
+};
 
 /**
  * Returns a Promise resolving to responseObj after parsing decoder with a given parsing function.
@@ -398,9 +391,13 @@ const getAvroSchema = async (decoder) => {
  * @returns {Promise} - Promise which resolves to the schema of the given file.
  */
 const getOriginalSchema = async (file) => {
-  let decoder = makeDecoder(file);
-  let schema = await getAvroSchema(decoder);
-  return schema;
+  if (CONFIG.schema != null) {
+    return CONFIG.schema;
+  } else {
+    let decoder = makeDecoder(file);
+    let schema = await getAvroSchema(decoder);
+    return schema;
+  }
 }
 
 /* <=== End of helper functions for reading .avro files ===> */
