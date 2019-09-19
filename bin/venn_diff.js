@@ -2,12 +2,13 @@
 
 const commander = require('commander');
 
-const {printVennDiff} = require('../lib/index.js');
+const {printVennDiff, vennDiff} = require('../lib/index.js');
 
 commander
-  .arguments('<file1> <file2>')
-  .action(function (file1, file2) {
-    printVennDiff(file1, file2);
+  .arguments('<oldFile> <newFile>')
+  .action(async function (oldFile, newFile) {
+    const diff = await vennDiff(oldFile, newFile);
+    printVennDiff(diff);
   });
 
 commander.parse(process.argv);

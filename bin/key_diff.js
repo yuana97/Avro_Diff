@@ -2,13 +2,14 @@
 
 const commander = require('commander');
 
-const {printKeyDiff} = require('../lib/index.js');
+const {printKeyDiff, keyDiff} = require('../lib/index.js');
 
 commander
-  .arguments('<file1> <file2> <key>')
-  .action(async function (file1, file2, key) {
+  .arguments('<oldFile> <newFile> <key>')
+  .action(async function (oldFile, newFile, key) {
     const keyArr = key.split(',');
-    await printKeyDiff(file1, file2, keyArr);
+    const diff = await keyDiff(oldFile, newFile, keyArr);
+    printKeyDiff(diff);
   });
 
 commander.parse(process.argv);
