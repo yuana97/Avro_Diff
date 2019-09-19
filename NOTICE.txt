@@ -1,0 +1,2 @@
+avro/sample_avro includes data from Teradata
+used under the Apache License. (https://github.com/Teradata/kylo/tree/master/samples/sample-data/avro)
